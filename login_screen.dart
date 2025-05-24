@@ -83,16 +83,19 @@ class _LoginScreenState extends State<LoginScreen> {
     print('Attempting to update/create user document for UID: ${user.uid}');
     DocumentReference userDocRef = _firestore.collection('users').doc(user.uid);
 
+    // Initial data map, primarily for new user creation.
+    // Some of these will also be used for updates if user logs in.
     Map<String, dynamic> userDataToSet = {
       'email': user.email,
-      'displayName': user.displayName,
+      'displayName': user.displayName, // Ensure this is set; might be null from User object initially for email/pass
       'lastLoginAt': FieldValue.serverTimestamp(),
-      'userId': user.uid,
+      'userId': user.uid, // Good to have this explicitly in the document too
     };
 
+    // Add referral information to the map if provided (typically on sign-up)
     if (usedReferralCode != null && usedReferralCode.isNotEmpty) {
       userDataToSet['usedReferralCode'] = usedReferralCode;
-      userDataToSet['referralBenefitApplied'] = true;
+      userDataToSet['referralBenefitApplied'] = true; // Assuming benefit is applied by using the code
       if (referredByInfluencerId != null && referredByInfluencerId.isNotEmpty) {
         userDataToSet['referredByInfluencerId'] = referredByInfluencerId;
       }
@@ -101,21 +104,26 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await _firestore.runTransaction((transaction) async {
         DocumentSnapshot userDocSnapshot = await transaction.get(userDocRef);
+
         if (!userDocSnapshot.exists) {
+          // New user: add createdAt and currentTier
           userDataToSet['createdAt'] = FieldValue.serverTimestamp();
+          userDataToSet['currentTier'] = 'free'; // <-- **** ADDED THIS LINE ****
           transaction.set(userDocRef, userDataToSet);
-          print('Created new user document in Firestore for UID: ${user.uid} with referral: $usedReferralCode');
+          print('Created new user document in Firestore for UID: ${user.uid} with tier: free and referral: $usedReferralCode');
         } else {
+          // Existing user: update specific fields like lastLoginAt, and potentially displayName/email if they can change
           Map<String, dynamic> updateData = {
-            'email': user.email,
-            'displayName': user.displayName,
+            'email': user.email, // Sync email, useful if user changes it with provider
+            'displayName': user.displayName, // Sync displayName
             'lastLoginAt': FieldValue.serverTimestamp(),
+            // We DO NOT set 'currentTier' here for existing users,
+            // as they might have upgraded. It's only set on creation.
           };
-          // Only add referral info if it's being applied now (typically only on create for this logic)
-          // If userDoc doesn't have referral code yet, and one is provided now, add it.
-          // This part of logic might need refinement based on whether referral codes can be added post-signup.
-          // For now, this primarily sets it on creation.
-          if (usedReferralCode != null && usedReferralCode.isNotEmpty && 
+
+          // This logic allows adding a referral code if an existing user somehow didn't have one
+          // and is now providing one. This might be an edge case.
+          if (usedReferralCode != null && usedReferralCode.isNotEmpty &&
               (userDocSnapshot.data() as Map<String,dynamic>?)?['usedReferralCode'] == null) {
                 updateData['usedReferralCode'] = usedReferralCode;
                 updateData['referralBenefitApplied'] = true;
